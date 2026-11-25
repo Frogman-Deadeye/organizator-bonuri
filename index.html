@@ -71,6 +71,12 @@ td details{margin:4px 0 0;padding:0;border:0;background:none}
 td summary{font-size:13px;min-height:24px;color:var(--mute);font-weight:400}
 td pre{max-height:180px;overflow:auto}
 footer{color:var(--mute);font-size:14px}
+.rawrow td{background:var(--bg);padding:14px 16px}
+.rawhead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.rawhead b{font-size:15px}
+.rawrow pre{margin:0;max-height:none;white-space:pre-wrap;font-size:14px;line-height:1.6;background:var(--paper);border:1px solid var(--line)}
+.link{background:none;border:0;padding:0;min-height:32px;color:#6f86ff;font-weight:600;font-size:14px;cursor:pointer}
+@media(max-width:600px){.stack .rawrow td{padding-inline-start:12px}.stack .rawrow td::before{display:none}}
 </style>
 <script>new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;c.dataset.l=c.closest('table').rows[0].cells[i]?.textContent||''}}).observe(document,{childList:true,subtree:true})</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -182,15 +188,16 @@ function render(){
     if(it.status==='err')st='<span class="st bad">Eroare</span>';
     if(it.status==='done')st=chk?'<span class="st warn">De verificat</span>':'<span class="st ok">Gata</span>';
     const obs=(it.err||d.obs)?`<div class="obs">${esc(it.err||d.obs)}</div>`:'';
-    const raw=d.raw?`<details><summary>Text citit</summary><pre>${esc(d.raw)}</pre></details>`:'';
+    const raw=d.raw?`<div><button class="link" data-raw aria-expanded="${!!it.open}">${it.open?'Ascunde textul citit ▴':'Vezi textul citit ▾'}</button></div>`:'';
     return `<tr data-id="${it.id}">
       <td><img class="thumb" src="${it.url}" alt="Bon ${esc(it.file.name)}"></td>
-      <td><input type="text" inputmode="numeric" placeholder="ZZ.LL.AAAA" data-f="date" value="${esc(showDate(d.date))}" aria-label="Data" style="max-width:130px"></td>
+      <td><input type="text" inputmode="numeric" placeholder="ZZ.LL.AAAA" data-f="date" value="${esc(showDate(d.date))}" aria-label="Data" style="min-width:128px"></td>
       <td><input type="text" data-f="shop" value="${esc(d.shop||'')}" aria-label="Magazin"></td>
       <td><input type="text" inputmode="decimal" class="num" data-f="total" value="${d.total!=null&&d.total!==''?esc((Number(d.total)||0).toFixed(2).replace('.',',')):''}" aria-label="Total"></td>
       <td><div class="fname" data-p>${esc(it.path)}</div></td>
       <td>${st}${obs}${raw}${it.status==='err'?' <button class="x" data-retry>Reîncearcă</button>':''}</td>
-      <td><button class="x" data-del aria-label="Șterge bonul">Șterge</button></td></tr>`}).join('');
+      <td><button class="x" data-del aria-label="Șterge bonul">Șterge</button></td></tr>`+
+      (d.raw&&it.open?`<tr class="rawrow" data-id="${it.id}"><td colspan="7"><div class="rawhead"><b>Text citit de pe bon (${esc(it.file.name)})</b><button class="x" data-copy>Copiază textul</button></div><pre>${esc(d.raw)}</pre></td></tr>`:'')}).join('');
   stats();
 }
 function stats(){
@@ -241,7 +248,12 @@ $('rows').addEventListener('click',e=>{
   const i=items.findIndex(x=>x.id==tr.dataset.id);
   if(e.target.closest('[data-del]')){URL.revokeObjectURL(items[i].url);items.splice(i,1);render()}
   else if(e.target.closest('[data-retry]')){items[i].status='wait';items[i].err='';render();run()}
+  else if(e.target.closest('[data-raw]')){items[i].open=!items[i].open;render()}
+  else if(e.target.closest('[data-copy]')){const b=e.target.closest('[data-copy]'),t=items[i].data.raw;
+    const done=()=>{b.textContent='Copiat ✓';setTimeout(()=>{b.textContent='Copiază textul'},1600)};
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done,()=>selectPre(tr));else selectPre(tr)}
 });
+function selectPre(tr){const pre=tr.querySelector('pre')||tr.nextElementSibling?.querySelector('pre');if(!pre)return;const r=document.createRange();r.selectNodeContents(pre);const s=getSelection();s.removeAllRanges();s.addRange(r);msg('Textul e selectat: apasă Ctrl+C pentru a-l copia.')}
 $('bClr').addEventListener('click',()=>{items.forEach(it=>URL.revokeObjectURL(it.url));items=[];aiMs=0;aiCount=0;msg('');render()});
 
 /* ---------- prelucrare imagine ---------- */
@@ -336,12 +348,19 @@ async function getOcr(){
   ocrWorker=await Tesseract.createWorker('ron',1,{logger:m=>{const it=items.find(i=>i.status==='run');if(it&&m.status==='recognizing text'){it.prog='Se citește… '+Math.round(m.progress*100)+'%';const tr=document.querySelector(`tr[data-id="${it.id}"] .st`);if(tr)tr.textContent=it.prog}}});
   return ocrWorker;
 }
+function cleanText(t){
+  return t.split(/\r?\n/).map(l=>l.replace(/[|_—–~=«»“”„]+/g,' ').replace(/^[\s\W]+(?=[A-Za-z0-9ĂÂÎȘȚăâîșț])/,'').replace(/\s+$/,'').replace(/ {3,}/g,'   ').replace(/^ +/,''))
+    .filter(l=>{const an=(l.match(/[A-Za-z0-9ĂÂÎȘȚăâîșț]/g)||[]).length;return an>=3&&an/l.replace(/\s/g,'').length>=0.6})
+    .join('\n');
+}
 async function readOcr(it){
   const w=await getOcr();const c=await canvasOf(it.file,2200,true);const out=[];
   for(const psm of ['4','6']){await w.setParameters({tessedit_pageseg_mode:psm,preserve_interword_spaces:'1'});
     const {data}=await w.recognize(c);out.push({r:parseReceipt(data.text||''),t:data.text||''});
     if(psm==='4'&&out[0].r.conf==='mare')break}
-  const r=out.length>1?merge(out[0].r,out[1].r):out[0].r;r.raw=out.map(o=>o.t).join('\n-----\n');return r;
+  const r=out.length>1?merge(out[0].r,out[1].r):out[0].r;
+  const score=o=>(o.r._ds?2:o.r.date?1:0)+(o.r._ts?2:o.r.total!=null?1:0)+(o.r._chain?1:0)+cleanText(o.t).split('\n').length/100;
+  r.raw=cleanText(out.reduce((a,b)=>score(b)>score(a)?b:a).t);return r;
 }
 
 /* ---------- motor 2: Gemini ---------- */
