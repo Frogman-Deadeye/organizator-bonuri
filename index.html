@@ -72,6 +72,21 @@ td summary{font-size:13px;min-height:24px;color:var(--mute);font-weight:400}
 td pre{max-height:180px;overflow:auto}
 footer{color:var(--mute);font-size:14px}
 .rawrow td{background:var(--bg);padding:14px 16px}
+.rawgrid{display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:16px;align-items:start}
+.rawgrid img{width:100%;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block}
+@media(max-width:700px){.rawgrid{grid-template-columns:minmax(0,1fr)}}
+.thumbbtn{padding:0;border:0;background:none;min-height:0;cursor:zoom-in;border-radius:6px}
+#lb{position:fixed;inset:0;z-index:50;background:rgba(8,10,24,.97);display:none;flex-direction:column}
+#lb.on{display:flex}
+#lb .top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:10px 14px;color:#fff}
+#lb .top span{font:500 14px/1.4 "IBM Plex Mono",monospace;overflow-wrap:anywhere}
+#lb .top div{display:flex;gap:8px}
+#lb button{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);color:#fff}
+#lb .stage{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:0 12px 12px}
+#lb img{max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;border-radius:6px}
+#lb.zoom .stage{align-items:flex-start;justify-content:flex-start}
+#lb.zoom img{max-width:none;max-height:none;width:200%;cursor:zoom-out}
+@media(min-width:900px){#lb.zoom img{width:auto}}
 .rawhead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:8px}
 .rawhead b{font-size:15px}
 .rawrow pre{margin:0;max-height:none;white-space:pre-wrap;font-size:14px;line-height:1.6;background:var(--paper);border:1px solid var(--line)}
@@ -135,6 +150,11 @@ footer{color:var(--mute);font-size:14px}
     <pre id="promptTxt"></pre>
   </details>
 </div></main>
+<div id="lb" role="dialog" aria-modal="true" aria-label="Previzualizare bon">
+  <div class="top"><span id="lbCap"></span>
+    <div><button id="lbPrev" aria-label="Bonul anterior">‹</button><button id="lbNext" aria-label="Bonul următor">›</button><button id="lbZoom">Mărește</button><button id="lbClose" aria-label="Închide">✕</button></div></div>
+  <div class="stage" id="lbStage"><img id="lbImg" alt=""></div>
+</div>
 <footer class="band"><div class="wrap">Proiect realizat pentru cursul „Competențe digitale – Utilizarea inteligenței artificiale”. Folosește Tesseract.js, SheetJS și JSZip.</div></footer>
 
 <script>
@@ -190,14 +210,14 @@ function render(){
     const obs=(it.err||d.obs)?`<div class="obs">${esc(it.err||d.obs)}</div>`:'';
     const raw=d.raw?`<div><button class="link" data-raw aria-expanded="${!!it.open}">${it.open?'Ascunde textul citit ▴':'Vezi textul citit ▾'}</button></div>`:'';
     return `<tr data-id="${it.id}">
-      <td><img class="thumb" src="${it.url}" alt="Bon ${esc(it.file.name)}"></td>
+      <td><button class="thumbbtn" data-view title="Vezi bonul mărit"><img class="thumb" src="${it.url}" alt="Bon ${esc(it.file.name)}"></button></td>
       <td><input type="text" inputmode="numeric" placeholder="ZZ.LL.AAAA" data-f="date" value="${esc(showDate(d.date))}" aria-label="Data" style="min-width:128px"></td>
       <td><input type="text" data-f="shop" value="${esc(d.shop||'')}" aria-label="Magazin"></td>
       <td><input type="text" inputmode="decimal" class="num" data-f="total" value="${d.total!=null&&d.total!==''?esc((Number(d.total)||0).toFixed(2).replace('.',',')):''}" aria-label="Total"></td>
       <td><div class="fname" data-p>${esc(it.path)}</div></td>
       <td>${st}${obs}${raw}${it.status==='err'?' <button class="x" data-retry>Reîncearcă</button>':''}</td>
       <td><button class="x" data-del aria-label="Șterge bonul">Șterge</button></td></tr>`+
-      (d.raw&&it.open?`<tr class="rawrow" data-id="${it.id}"><td colspan="7"><div class="rawhead"><b>Text citit de pe bon (${esc(it.file.name)})</b><button class="x" data-copy>Copiază textul</button></div><pre>${esc(d.raw)}</pre></td></tr>`:'')}).join('');
+      (d.raw&&it.open?`<tr class="rawrow" data-id="${it.id}"><td colspan="7"><div class="rawhead"><b>Text citit de pe bon (${esc(it.file.name)})</b><button class="x" data-copy>Copiază textul</button></div><div class="rawgrid"><img src="${it.url}" alt="Bon ${esc(it.file.name)}" data-view title="Vezi bonul mărit"><pre>${esc(d.raw)}</pre></div></td></tr>`:'')}).join('');
   stats();
 }
 function stats(){
@@ -246,13 +266,26 @@ $('rows').addEventListener('change',e=>{
 $('rows').addEventListener('click',e=>{
   const tr=e.target.closest('tr[data-id]');if(!tr)return;
   const i=items.findIndex(x=>x.id==tr.dataset.id);
-  if(e.target.closest('[data-del]')){URL.revokeObjectURL(items[i].url);items.splice(i,1);render()}
+  if(e.target.closest('[data-del]')){closeLb();URL.revokeObjectURL(items[i].url);items.splice(i,1);render()}
   else if(e.target.closest('[data-retry]')){items[i].status='wait';items[i].err='';render();run()}
+  else if(e.target.closest('[data-view]')){openLb(i)}
   else if(e.target.closest('[data-raw]')){items[i].open=!items[i].open;render()}
   else if(e.target.closest('[data-copy]')){const b=e.target.closest('[data-copy]'),t=items[i].data.raw;
     const done=()=>{b.textContent='Copiat ✓';setTimeout(()=>{b.textContent='Copiază textul'},1600)};
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done,()=>selectPre(tr));else selectPre(tr)}
 });
+let lbI=-1;
+function openLb(i){if(!items[i])return;lbI=i;const it=items[i];names();
+  $('lbImg').src=it.url;$('lbImg').alt='Bon '+it.file.name;
+  $('lbCap').textContent=`${i+1} / ${items.length} · ${it.file.name} → ${it.path}`;
+  $('lb').classList.add('on');$('lb').classList.remove('zoom');$('lbZoom').textContent='Mărește';
+  $('lbPrev').disabled=i===0;$('lbNext').disabled=i===items.length-1;$('lbClose').focus()}
+function closeLb(){$('lb').classList.remove('on');lbI=-1}
+function zoomLb(){const z=$('lb').classList.toggle('zoom');$('lbZoom').textContent=z?'Micșorează':'Mărește'}
+$('lbClose').addEventListener('click',closeLb);$('lbZoom').addEventListener('click',zoomLb);$('lbImg').addEventListener('click',zoomLb);
+$('lbPrev').addEventListener('click',()=>openLb(lbI-1));$('lbNext').addEventListener('click',()=>openLb(lbI+1));
+$('lbStage').addEventListener('click',e=>{if(e.target===$('lbStage'))closeLb()});
+document.addEventListener('keydown',e=>{if(lbI<0)return;if(e.key==='Escape')closeLb();else if(e.key==='ArrowLeft')openLb(lbI-1);else if(e.key==='ArrowRight')openLb(lbI+1)});
 function selectPre(tr){const pre=tr.querySelector('pre')||tr.nextElementSibling?.querySelector('pre');if(!pre)return;const r=document.createRange();r.selectNodeContents(pre);const s=getSelection();s.removeAllRanges();s.addRange(r);msg('Textul e selectat: apasă Ctrl+C pentru a-l copia.')}
 $('bClr').addEventListener('click',()=>{items.forEach(it=>URL.revokeObjectURL(it.url));items=[];aiMs=0;aiCount=0;msg('');render()});
 
