@@ -124,7 +124,7 @@ footer{color:var(--mute);font-size:14px}
   </div>
   <p class="msg">Poți corecta orice câmp direct în tabel. Bonurile marcate „de verificat” au fost citite cu încredere scăzută.</p>
   <details><summary>Cum citește aplicația bonurile</summary>
-    <p><b>OCR în browser:</b> pozele sunt prelucrate (alb-negru, contrast mărit), apoi modelul neuronal Tesseract (limba română) extrage textul direct pe calculatorul tău; nicio poză nu pleacă de pe dispozitiv. Din text, aplicația caută data (ZZ.LL.AAAA), rândul TOTAL, codul fiscal (CUI/CIF) și numele magazinului.</p>
+    <p><b>OCR în browser:</b> pozele sunt prelucrate (alb-negru, contrast mărit), apoi modelul neuronal Tesseract (limba română) extrage textul direct pe calculatorul tău; nicio poză nu pleacă de pe dispozitiv. Textul e citit în două moduri de așezare a paginii, iar rezultatele se combină. Aplicația caută data (din rândul DATA și, ca verificare, din codul ID UNIC, care conține data), totalul (TOTAL DE PLATĂ / TOTAL, confirmat cu suma plătită cu cardul, numerar sau voucher), codul fiscal și numele magazinului.</p>
     <p><b>Google Gemini:</b> poza este trimisă modelului împreună cu promptul de mai jos.</p>
     <pre id="promptTxt"></pre>
   </details>
@@ -243,54 +243,96 @@ $('bClr').addEventListener('click',()=>{items.forEach(it=>URL.revokeObjectURL(it
 /* ---------- prelucrare imagine ---------- */
 async function canvasOf(file,maxSide,gray){
   const bmp=await createImageBitmap(file);
-  let k=Math.min(maxSide/Math.max(bmp.width,bmp.height),gray?2.5:1);
-  const c=document.createElement('canvas');c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);
-  const g=c.getContext('2d');g.drawImage(bmp,0,0,c.width,c.height);
-  if(gray){const im=g.getImageData(0,0,c.width,c.height),a=im.data;let lo=255,hi=0;
-    for(let i=0;i<a.length;i+=4){const v=0.299*a[i]+0.587*a[i+1]+0.114*a[i+2];a[i]=v;if(v<lo)lo=v;if(v>hi)hi=v}
-    const r=Math.max(1,hi-lo);for(let i=0;i<a.length;i+=4){const v=Math.max(0,Math.min(255,(a[i]-lo)*255/r));a[i]=a[i+1]=a[i+2]=v}
-    g.putImageData(im,0,0)}
-  return c;
+  const k=Math.min(maxSide/Math.max(bmp.width,bmp.height),gray?2.5:1);
+  const c=document.createElement('canvas'),W=c.width=Math.round(bmp.width*k),H=c.height=Math.round(bmp.height*k);
+  const g=c.getContext('2d');g.drawImage(bmp,0,0,W,H);
+  if(!gray)return c;
+  /* alb-negru cu prag adaptiv: fiecare pixel e comparat cu media zonei lui (elimină umbrele și fundalul) */
+  const im=g.getImageData(0,0,W,H),a=im.data,v=new Float32Array(W*H),S=new Float64Array((W+1)*(H+1));
+  for(let i=0,p=0;p<W*H;i+=4,p++)v[p]=0.299*a[i]+0.587*a[i+1]+0.114*a[i+2];
+  for(let y=0;y<H;y++){let row=0;for(let x=0;x<W;x++){row+=v[y*W+x];S[(y+1)*(W+1)+x+1]=S[y*(W+1)+x+1]+row}}
+  const R=25;
+  for(let y=0;y<H;y++){const y0=Math.max(0,y-R),y1=Math.min(H,y+R+1);
+    for(let x=0;x<W;x++){const x0=Math.max(0,x-R),x1=Math.min(W,x+R+1);
+      const m=(S[y1*(W+1)+x1]-S[y0*(W+1)+x1]-S[y1*(W+1)+x0]+S[y0*(W+1)+x0])/((x1-x0)*(y1-y0));
+      const o=(y*W+x)*4,b=v[y*W+x]<m-12?0:255;a[o]=a[o+1]=a[o+2]=b}}
+  g.putImageData(im,0,0);return c;
 }
 
 /* ---------- motor 1: OCR + reguli ---------- */
 function parseReceipt(text){
-  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean),U=strip(text).toUpperCase(),now=new Date().getFullYear();
-  let date='',total=null,cui='',nr='',shop='',chain=false;
-  const dre=/(\d{1,2})\s?[.\/-]\s?(\d{1,2})\s?[.\/-]\s?(\d{4}|\d{2})(?!\d)/g;
-  const dl=[...lines.filter(l=>/DATA/i.test(strip(l))),...lines];
-  outer:for(const l of dl){for(const m of l.replace(/[Oo](?=\d)|(?<=\d)[Oo]/g,'0').matchAll(dre)){
-    let d=+m[1],mo=+m[2],y=+m[3];if(y<100)y+=2000;
-    if(d>=1&&d<=31&&mo>=1&&mo<=12&&y>=2000&&y<=now+1){date=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;break outer}}}
-  const amts=l=>[...l.replace(/\s+(?=\d{2}\b)/g,'').matchAll(/(\d{1,6})\s?[.,]\s?(\d{2})(?!\d)/g)].map(m=>parseFloat(m[1]+'.'+m[2]));
-  for(let i=0;i<lines.length&&total==null;i++){const s=strip(lines[i]).toUpperCase();
-    if(/T[O0]TAL/.test(s)&&!/SUB\s?T[O0]TAL|TVA|T[O0]TAL\s+TVA|DISCOUNT|REDUCERE/.test(s)){
-      let a=amts(lines[i]);if(!a.length&&lines[i+1])a=amts(lines[i+1]);if(a.length)total=a[a.length-1]}}
-  if(total==null)for(const l of lines){const s=strip(l).toUpperCase();if(/CARD|NUMERAR|PLATA|DE PLATA/.test(s)){const a=amts(l);if(a.length){total=a[a.length-1];break}}}
-  const cm=/(C\.?\s?U\.?\s?I|C\.?\s?I\.?\s?F|COD\s+FISCAL|COD\s+IDENTIFICARE(\s+FISCALA)?)[^0-9R]{0,6}((?:R\s?O)?\s?\d{2,10})/.exec(U);
-  if(cm)cui=cm[3].replace(/\s/g,'');
-  const nm=/(BON\s*(FISCAL)?\s*NR\.?|NR\.?\s*BON|BF\s*NR\.?)[:\s#]*(\d{1,8})/.exec(U);if(nm)nr=nm[3];
-  for(const c of CHAINS){const k=strip(c).toUpperCase().replace(/[.']/g,'\\$&');
-    if(new RegExp('(^|[^A-Z])'+k.replace(/ /g,'\\s?')+'($|[^A-Z])').test(U)){shop=c;chain=true;break}}
-  if(!shop){const l=lines.slice(0,5).find(l=>(strip(l).match(/[A-Za-z]/g)||[]).length>=3&&!/BON|FISCAL|C\.?I\.?F|C\.?U\.?I|STR|JUD|NR\./i.test(strip(l)));
-    if(l)shop=strip(l).replace(/^S\.?\s?C\.?\s+/i,'').replace(/\s+(S\.?\s?R\.?\s?L|S\.?\s?A)\.?\b.*$/i,'').replace(/[^A-Za-z0-9&' -]/g,'').trim().toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase()).slice(0,30)}
-  const miss=[!date&&'data',total==null&&'totalul',!shop&&'magazinul'].filter(Boolean);
-  const conf=date&&total!=null&&chain?'mare':date&&total!=null?'medie':'mica';
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean),U=strip(text).toUpperCase(),today=new Date(),now=today.getFullYear();
+  const L=lines.map(l=>strip(l).toUpperCase());
+  let date='',dateSure=false,total=null,totalSure=false,cui='',nr='',shop='',chain=false;
+  const pad=n=>String(n).padStart(2,'0'),okDM=(d,m)=>d>=1&&d<=31&&m>=1&&m<=12;
+  const fixYear=(d,m)=>{let y=now;if(new Date(y,m-1,d)>today)y--;return y};
+  // 1) data: rândul cu DATA, apoi orice dată completă
+  const dre=/(\d{1,2})\s?[.\/-]\s?(\d{1,2})\s?[.\/-]\s?(\d{2,4})(?!\d)/g;
+  const order=[...L.keys()].sort((a,b)=>(/DATA/.test(L[b])?1:0)-(/DATA/.test(L[a])?1:0));
+  let partial=null;
+  outer:for(const i of order){for(const m of L[i].replace(/(?<=\d)O|O(?=\d)/g,'0').matchAll(dre)){
+    const d=+m[1],mo=+m[2];let y=+m[3];if(!okDM(d,mo))continue;
+    if(m[3].length===2)y+=2000;
+    const dt=new Date(y,mo-1,d),age=(today-dt)/864e5;
+    if(m[3].length!==3&&age>=-1&&age<=400){date=`${y}-${pad(mo)}-${pad(d)}`;dateSure=true;break outer}
+    if(!partial&&/DATA/.test(L[i]))partial={d,mo}}}
+  // 2) data din ID UNIC (conține AAAALLZZ)
+  if(!dateSure){for(const l of L){if(!/UNIC|ID|BF/.test(l)&&!/\d{18,}/.test(l.replace(/\s/g,'')))continue;
+    const s=l.replace(/\s/g,'');const re=/20(\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/g;let m;
+    while(m=re.exec(s)){const y=2000+ +m[1],mo=+m[2],d=+m[3];
+      const dt=new Date(y,mo-1,d),age=(today-dt)/864e5;
+      if(age>=-1&&age<=400&&(!partial||(partial.d===d&&partial.mo===mo))){
+        const fy=partial?fixYear(d,mo):y;date=`${fy}-${pad(mo)}-${pad(d)}`;dateSure=!!partial&&fy===y;break}}
+    if(date)break}}
+  if(!date&&partial){date=`${fixYear(partial.d,partial.mo)}-${pad(partial.mo)}-${pad(partial.d)}`}
+  // 3) total: prioritate pe tipuri de rânduri
+  const amts=l=>[...l.matchAll(/(?<![\d.,])(\d{1,5})\s?[.,]\s?(\d{2})(?![\d.,])/g)].map(m=>parseFloat(m[1]+'.'+m[2]));
+  const BAD=/SUB\s?T[O0]TAL|TVA|INTREG|REDUCERE|DISCOUNT|VALOARE|ECONOMISIT|REST\b|BUC\b|X\s*\d/;
+  const pick=(re,next)=>{for(let i=0;i<L.length;i++){if(re.test(L[i])&&!BAD.test(L[i])){let a=amts(L[i]);if(!a.length&&next&&L[i+1]&&!BAD.test(L[i+1]))a=amts(L[i+1]);if(a.length)return a[a.length-1]}}return null};
+  const tPlata=pick(/T[O0]TAL\s+DE\s+PLAT/,true),tMain=pick(/(^|[^A-Z])T[O0]TAL([^A-Z]|$)|T[O0]TAL\s+LEI/,true);
+  const pay=[];for(let i=0;i<L.length;i++){if(/\b(CARD|NUMERAR|VOUCHER|VUUCHER|GLOVO|BOLT|TAZZ|TICHET|PLATA)\b/.test(L[i])&&!BAD.test(L[i])&&!/NR\.?\s*:|XTRA|LOIAL|T[O0]TAL/.test(L[i])){const a=amts(L[i]);if(a.length)pay.push(a[a.length-1])}}
+  total=tPlata??tMain??(pay.length?pay[0]:null);
+  totalSure=total!=null&&(pay.includes(total)||(tPlata!=null&&tMain!=null&&tPlata===tMain));
+  // 4) CUI, nr bon
+  const cm=/(C\.?\s?U\.?\s?I|C\.?\s?I\.?\s?F|COD\s+FISCAL|FISCALA)[\s:.]*((?:R\s?[O0])?\s?\d{2,10})/.exec(U);
+  if(cm)cui=cm[2].replace(/\s/g,'').replace(/^R0/,'RO');
+  const nm=/(NR\.?\s*BON|BON\s*(FISCAL)?\s*NR\.?|^BON)\s*[:#]?\s*(\d{2,8})/m.exec(U);if(nm)nr=nm[3];
+  // 5) magazin
+  for(const c of CHAINS){const k=strip(c).toUpperCase().replace(/[.']/g,'\\$&').replace(/ /g,'\\s?');
+    if(new RegExp('(^|[^A-Z])'+k+'($|[^A-Z])').test(U)){shop=c;chain=true;break}}
+  if(!shop){const ADDR=/BON|FISCAL|C\.?I\.?F|C\.?U\.?I|STR|JUD|NR\.|MUNICIPIUL|SECTOR|BUCURESTI|CALEA|BD\.?|BULEVARD|SOS|PARTER|COD|TEL/;
+    const l=lines.slice(0,6).find((x,i)=>(L[i].match(/[A-Z]/g)||[]).length>=4&&!ADDR.test(L[i]));
+    if(l)shop=strip(l).replace(/^S\.?\s?C\.?\s+/i,'').replace(/\s+(S\.?\s?R\.?\s?L|S\.?\s?A|SCS)\.?\b.*$/i,'').replace(/[^A-Za-z0-9&' -]/g,'').trim().toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase()).slice(0,30)}
   const isReceipt=/FISCAL|T[O0]TAL|TVA|C\.?I\.?F|C\.?U\.?I/.test(U);
-  return {date,shop,cui,nr,total,conf,notReceipt:!isReceipt,
-    obs:!isReceipt?'Imaginea nu pare a fi un bon fiscal.':miss.length?'Nu s-a putut citi: '+miss.join(', ')+'.':conf==='medie'?'Verifică numele magazinului.':''};
+  return finalize({date,shop,cui,nr,total,_ds:dateSure,_ts:totalSure,_chain:chain,notReceipt:!isReceipt});
 }
+function finalize(r){
+  const miss=[!r.date&&'data',r.total==null&&'totalul',!r.shop&&'magazinul'].filter(Boolean);
+  r.conf=(r._ds&&r._ts&&r._chain)?'mare':(r.date&&r.total!=null)?'medie':'mica';
+  const n=[];if(miss.length)n.push('Nu s-a putut citi: '+miss.join(', ')+'.');
+  if(r.date&&!r._ds)n.push('Data dedusă parțial, verific-o.');if(r.total!=null&&!r._ts)n.push('Verifică totalul.');if(r.shop&&!r._chain)n.push('Verifică magazinul.');
+  r.obs=r.notReceipt?'Imaginea nu pare a fi un bon fiscal.':n.join(' ');return r;
+}
+function merge(a,b){
+  const r={...a};
+  if((!a.date&&b.date)||(!a._ds&&b._ds)){r.date=b.date;r._ds=b._ds}
+  if((a.total==null&&b.total!=null)||(!a._ts&&b._ts)){r.total=b.total;r._ts=b._ts}
+  if((!a.shop&&b.shop)||(!a._chain&&b._chain)){r.shop=b.shop;r._chain=b._chain}
+  if(!r.cui&&b.cui)r.cui=b.cui;if(!r.nr&&b.nr)r.nr=b.nr;r.notReceipt=a.notReceipt&&b.notReceipt;
+  return finalize(r)}
 async function getOcr(){
   if(ocrWorker)return ocrWorker;
   if(!window.Tesseract)throw new Error('Biblioteca OCR nu s-a încărcat. Verifică conexiunea la internet.');
   msg('Se încarcă modelul OCR pentru limba română (doar prima dată, câteva secunde)…');
   ocrWorker=await Tesseract.createWorker('ron',1,{logger:m=>{const it=items.find(i=>i.status==='run');if(it&&m.status==='recognizing text'){it.prog='Se citește… '+Math.round(m.progress*100)+'%';const tr=document.querySelector(`tr[data-id="${it.id}"] .st`);if(tr)tr.textContent=it.prog}}});
-  await ocrWorker.setParameters({tessedit_pageseg_mode:'4',preserve_interword_spaces:'1'});
   return ocrWorker;
 }
 async function readOcr(it){
-  const w=await getOcr();const c=await canvasOf(it.file,2200,true);
-  const {data}=await w.recognize(c);const r=parseReceipt(data.text||'');r.raw=data.text||'';return r;
+  const w=await getOcr();const c=await canvasOf(it.file,2200,true);const out=[];
+  for(const psm of ['4','6']){await w.setParameters({tessedit_pageseg_mode:psm,preserve_interword_spaces:'1'});
+    const {data}=await w.recognize(c);out.push({r:parseReceipt(data.text||''),t:data.text||''});
+    if(psm==='4'&&out[0].r.conf==='mare')break}
+  const r=out.length>1?merge(out[0].r,out[1].r):out[0].r;r.raw=out.map(o=>o.t).join('\n-----\n');return r;
 }
 
 /* ---------- motor 2: Gemini ---------- */
