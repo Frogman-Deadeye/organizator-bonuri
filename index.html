@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organizator bonuri fiscale</title>
+<meta name="description" content="Aplicație care citește bonurile fiscale cu AI, le redenumește după dată, le organizează în foldere pe lună și generează un Excel centralizator pentru decontare.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+/* VOICE: practical office tool, calm and exact, Romanian.
+   IDEA: a roll of thermal receipt paper feeding into labelled month folders.
+   PICTURE: the working tool itself: drop zone + receipt list with live file names.
+   COLOUR and TYPE: deep ink blue ground, receipt-paper white, fiscal red accent; Plex Sans + Plex Mono for amounts.
+   LAYOUT: title band, drop zone, summary row, editable table, export actions. */
+:root{color-scheme:light dark;--bg:light-dark(#f3f1ec,#12162b);--paper:light-dark(#ffffff,#1c2140);--ink:light-dark(#1a1f36,#eceef7);--mute:light-dark(#5d637a,#a3a9c2);--line:light-dark(#dfdcd4,#2f3560);--band:#1d2a5c;--red:#d9342b;--ok:light-dark(#1f7a4d,#5fd39a);--warn:light-dark(#b25e00,#ffb35c)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "IBM Plex Sans",system-ui,sans-serif;overflow-x:clip}
+.band{padding:clamp(24px,4vw,48px) max(5vw,16px)}
+.wrap{max-width:1240px;margin:0 auto}
+header{background:var(--band);color:#fff}
+header h1{font-size:clamp(28px,4vw,42px);line-height:1.05;margin:0 0 8px;text-wrap:balance}
+header p{margin:0;max-width:62ch;color:#cdd3ee}
+.drop{margin-top:22px;border:2px dashed #8d9ad6;border-radius:14px;background:rgba(255,255,255,.06);padding:28px 20px;text-align:center;cursor:pointer;transition:background .2s}
+.drop.on{background:rgba(255,255,255,.16)}
+.drop strong{display:block;font-size:20px}
+.drop span{color:#cdd3ee;font-size:15px}
+.drop input{display:none}
+.opts{display:flex;flex-wrap:wrap;gap:10px 22px;margin-top:16px;color:#e4e8fa;font-size:15px}
+.opts label{display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer}
+.opts input{width:20px;height:20px;accent-color:var(--red)}
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat b{display:block;font:500 24px/1.2 "IBM Plex Mono",monospace;white-space:nowrap}
+.stat small{color:var(--mute);font-size:13px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+button{font:600 16px "IBM Plex Sans",sans-serif;min-height:44px;padding:0 18px;border-radius:9px;border:1px solid var(--line);background:var(--paper);color:var(--ink);cursor:pointer}
+button.pri{background:var(--red);border-color:var(--red);color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible{outline:3px solid #6f86ff;outline-offset:2px}
+.msg{min-height:24px;color:var(--mute);font-size:15px}
+.msg.err{color:var(--red)}
+table{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th{text-align:left;font-size:13px;color:var(--mute);font-weight:600;padding:10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+td input{width:100%;font:16px "IBM Plex Sans",sans-serif;padding:8px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--ink)}
+td input.num{text-align:right;font-family:"IBM Plex Mono",monospace;max-width:120px}
+.thumb{width:52px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
+.fname{font:500 13px/1.4 "IBM Plex Mono",monospace;overflow-wrap:anywhere;color:var(--mute)}
+.st{font-size:13px;font-weight:600;white-space:nowrap}
+.st.ok{color:var(--ok)}.st.warn{color:var(--warn)}.st.bad{color:var(--red)}.st.run{color:var(--mute)}
+.obs{font-size:13px;color:var(--warn);margin-top:3px}
+.x{min-height:36px;padding:0 10px;font-size:14px}
+.empty{text-align:center;color:var(--mute);padding:36px 10px}
+details{margin-top:26px;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+summary{cursor:pointer;font-weight:600;min-height:32px}
+pre{overflow-x:auto;white-space:pre-wrap;font:13px/1.5 "IBM Plex Mono",monospace;background:var(--bg);padding:12px;border-radius:8px}
+.scroll{overflow-x:auto}
+@media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:8em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:7.5em;margin-inline-start:-8em;white-space:normal}.stack td:empty{display:none}td input.num{max-width:none}}
+@media(prefers-reduced-motion:reduce){.drop{transition:none}}
+.eng{margin-top:16px;display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;color:#e4e8fa;font-size:15px}
+.eng label{display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer}
+.eng input[type=radio]{width:20px;height:20px;accent-color:var(--red)}
+.keybox{display:none;width:100%;gap:10px;flex-wrap:wrap;align-items:center}
+.keybox.on{display:flex}
+.keybox input{font:16px "IBM Plex Sans",sans-serif;padding:10px;border-radius:8px;border:1px solid #8d9ad6;background:rgba(255,255,255,.08);color:#fff;flex:1 1 260px}
+.keybox small{color:#cdd3ee;flex-basis:100%}
+.keybox a{color:#fff}
+td details{margin:4px 0 0;padding:0;border:0;background:none}
+td summary{font-size:13px;min-height:24px;color:var(--mute);font-weight:400}
+td pre{max-height:180px;overflow:auto}
+footer{color:var(--mute);font-size:14px}
+</style>
+<script>new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;c.dataset.l=c.closest('table').rows[0].cells[i]?.textContent||''}}).observe(document,{childList:true,subtree:true})</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+</head>
+<body>
+<header class="band"><div class="wrap">
+  <h1>Organizator bonuri fiscale</h1>
+  <p>Încarci pozele bonurilor, iar AI-ul citește data, magazinul și totalul. Fiecare bon e redenumit și pus în folderul lunii lui, iar la final descarci arhiva ZIP cu un Excel centralizator, gata pentru decontare.</p>
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="image/jpeg,image/png,image/webp" multiple>
+    <strong>Trage pozele bonurilor aici</strong>
+    <span>sau apasă pentru a le alege (JPG, PNG, WEBP), oricâte deodată</span>
+  </label>
+  <div class="opts">
+    <label><input type="checkbox" id="optShop" checked> Magazinul în numele fișierului</label>
+    <label><input type="checkbox" id="optSum" checked> Suma în numele fișierului</label>
+  </div>
+  <div class="eng" role="radiogroup" aria-label="Motor de citire">
+    <span>Motor de citire:</span>
+    <label><input type="radio" name="eng" value="ocr" checked> OCR în browser (gratuit, fără cont)</label>
+    <label><input type="radio" name="eng" value="gemini"> Google Gemini (mai precis, cere cheie API)</label>
+    <div class="keybox" id="keybox">
+      <input type="password" id="key" placeholder="Cheia ta API Gemini" autocomplete="off" aria-label="Cheie API Gemini">
+      <input type="text" id="model" value="gemini-3.6-flash" aria-label="Model Gemini" style="flex:0 1 200px">
+      <small>Cheia se obține gratuit din <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> și rămâne doar în browserul tău.</small>
+    </div>
+  </div>
+</div></header>
+
+<main class="band"><div class="wrap">
+  <div class="sum">
+    <div class="stat"><b id="sN">0</b><small>bonuri încărcate</small></div>
+    <div class="stat"><b id="sT">0,00 lei</b><small>total cheltuieli</small></div>
+    <div class="stat"><b id="sW">0</b><small>de verificat manual</small></div>
+    <div class="stat"><b id="sTime">–</b><small>timp procesare AI (pe bon)</small></div>
+  </div>
+  <div class="bar">
+    <button class="pri" id="bRun" disabled>Citește bonurile cu AI</button>
+    <button id="bZip" disabled>Descarcă ZIP (foldere + Excel)</button>
+    <button id="bXls" disabled>Descarcă doar Excel</button>
+    <button id="bClr" disabled>Golește lista</button>
+  </div>
+  <div class="msg" id="msg" role="status"></div>
+  <div class="scroll">
+  <table class="stack" id="tbl">
+    <thead><tr><th>Bon</th><th>Data</th><th>Magazin</th><th>Total (lei)</th><th>Nume nou și folder</th><th>Stare</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="7" class="empty">Niciun bon încă. Încarcă poze mai sus.</td></tr></tbody>
+  </table>
+  </div>
+  <p class="msg">Poți corecta orice câmp direct în tabel. Bonurile marcate „de verificat” au fost citite cu încredere scăzută.</p>
+  <details><summary>Cum citește aplicația bonurile</summary>
+    <p><b>OCR în browser:</b> pozele sunt prelucrate (alb-negru, contrast mărit), apoi modelul neuronal Tesseract (limba română) extrage textul direct pe calculatorul tău; nicio poză nu pleacă de pe dispozitiv. Din text, aplicația caută data (ZZ.LL.AAAA), rândul TOTAL, codul fiscal (CUI/CIF) și numele magazinului.</p>
+    <p><b>Google Gemini:</b> poza este trimisă modelului împreună cu promptul de mai jos.</p>
+    <pre id="promptTxt"></pre>
+  </details>
+</div></main>
+<footer class="band"><div class="wrap">Proiect realizat pentru cursul „Competențe digitale – Utilizarea inteligenței artificiale”. Folosește Tesseract.js, SheetJS și JSZip.</div></footer>
+
+<script>
+{
+const MONTHS=['Ianuarie','Februarie','Martie','Aprilie','Mai','Iunie','Iulie','August','Septembrie','Octombrie','Noiembrie','Decembrie'];
+const PROMPT=`Ești un asistent care citește bonuri fiscale românești. Analizează imaginea și extrage: data emiterii, denumirea comerciantului (magazinul), CUI/CIF, numărul bonului și TOTALUL de plată în lei.
+
+Răspunde DOAR cu JSON valid, fără alt text, în formatul:
+{"este_bon": true, "data": "AAAA-LL-ZZ", "magazin": "...", "cui": "...", "nr_bon": "...", "total": 0.00, "incredere": "mare|medie|mica", "observatii": "..."}
+
+Reguli:
+1. Pe bon data apare de obicei ca ZZ.LL.AAAA sau ZZ/LL/AAAA; convertește-o în AAAA-LL-ZZ.
+2. Magazin: numele comercial scurt (ex. "Lidl", "Kaufland", "OMV"), nu denumirea juridică completă când numele comercial e evident.
+3. Totalul este suma de pe rândul TOTAL, nu subtotaluri, TVA sau rest.
+4. Dacă un câmp nu se poate citi, pune null și explică în "observatii".
+5. Dacă imaginea nu este un bon fiscal, pune "este_bon": false.`;
+const CHAINS=['Lidl','Kaufland','Carrefour','Auchan','Mega Image','Profi','Penny','Selgros','Metro','Cora','Annabella','Artima','La Doi Pasi','Unicarm','OMV','Petrom','MOL','Rompetrol','Lukoil','Socar','Gazprom','Dedeman','Hornbach','Leroy Merlin','Brico Depot','Bricostore','Ambient','Mathaus','Altex','Media Galaxy','Flanco','eMAG','Dr. Max','Catena','Sensiblu','Help Net','Farmacia Tei','Ducfarm','Pepco','Jysk','IKEA','Decathlon','Sezamo','Freshful','Diverta','Carturesti','Takko','KiK','Sinsay','H&M','Zara','McDonald\'s','KFC','Starbucks','5 to go','Paul','Spartan','Subway','Mr. Bricolage','Praktiker','Noriel','Orange','Vodafone','Digi','Telekom','Benvenuti','Deichmann','CCC','Douglas','Sephora','dm'];
+document.getElementById('promptTxt').textContent=PROMPT;
+
+const $=id=>document.getElementById(id);
+let items=[],nid=1,running=false,aiMs=0,aiCount=0,ocrWorker=null;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lei=n=>(Number(n)||0).toLocaleString('ro-RO',{minimumFractionDigits:2,maximumFractionDigits:2})+' lei';
+const msg=(t,err)=>{const m=$('msg');m.textContent=t;m.className='msg'+(err?' err':'')};
+const strip=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'');
+const clean=s=>strip(s).replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,28);
+const ext=f=>{const m=/\.([a-z0-9]+)$/i.exec(f.name);return (m?m[1]:'jpg').toLowerCase()};
+const store={get(k){try{return localStorage.getItem(k)||''}catch(e){return ''}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const engine=()=>document.querySelector('input[name=eng]:checked').value;
+
+function parts(d){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?{y:m[1],m:m[2],d:m[3]}:null}
+function baseName(it){
+  const p=parts(it.data.date);let n=p?`${p.d}-${p.m}-${p.y}`:'fara-data';
+  if($('optShop').checked&&it.data.shop)n+='_'+clean(it.data.shop);
+  if($('optSum').checked&&it.data.total!=null&&it.data.total!=='')n+='_'+(Number(it.data.total)||0).toFixed(2).replace('.',',')+'lei';
+  return n;
+}
+function folder(it){const p=parts(it.data.date);return p?`${p.y}/${p.m}-${MONTHS[+p.m-1]}`:'Fara-data'}
+function names(){const used={};for(const it of items){let b=baseName(it),f=folder(it),k=f+'/'+b,i=1;while(used[k])k=f+'/'+b+'_'+(++i);used[k]=1;it.path=k+'.'+ext(it.file)}}
+function needsCheck(it){const d=it.data;return it.status==='done'&&(d.conf!=='mare'||!parts(d.date)||d.total==null||d.total===''||d.notReceipt)}
+
+function render(){
+  names();
+  const tb=$('rows');
+  if(!items.length){tb.innerHTML='<tr><td colspan="7" class="empty">Niciun bon încă. Încarcă poze mai sus.</td></tr>'}
+  else tb.innerHTML=items.map(it=>{
+    const d=it.data,chk=needsCheck(it);
+    let st='<span class="st run">În așteptare</span>';
+    if(it.status==='run')st=`<span class="st run">${esc(it.prog||'Se citește…')}</span>`;
+    if(it.status==='err')st='<span class="st bad">Eroare</span>';
+    if(it.status==='done')st=chk?'<span class="st warn">De verificat</span>':'<span class="st ok">Gata</span>';
+    const obs=(it.err||d.obs)?`<div class="obs">${esc(it.err||d.obs)}</div>`:'';
+    const raw=d.raw?`<details><summary>Text citit</summary><pre>${esc(d.raw)}</pre></details>`:'';
+    return `<tr data-id="${it.id}">
+      <td><img class="thumb" src="${it.url}" alt="Bon ${esc(it.file.name)}"></td>
+      <td><input type="date" data-f="date" value="${esc(d.date||'')}" aria-label="Data"></td>
+      <td><input type="text" data-f="shop" value="${esc(d.shop||'')}" aria-label="Magazin"></td>
+      <td><input type="number" step="0.01" class="num" data-f="total" value="${esc(d.total??'')}" aria-label="Total"></td>
+      <td><div class="fname" data-p>${esc(it.path)}</div></td>
+      <td>${st}${obs}${raw}${it.status==='err'?' <button class="x" data-retry>Reîncearcă</button>':''}</td>
+      <td><button class="x" data-del aria-label="Șterge bonul">Șterge</button></td></tr>`}).join('');
+  stats();
+}
+function stats(){
+  names();
+  $('sN').textContent=items.length;
+  $('sT').textContent=lei(items.reduce((a,it)=>a+(Number(it.data.total)||0),0));
+  $('sW').textContent=items.filter(needsCheck).length;
+  $('sTime').textContent=aiCount?(aiMs/aiCount/1000).toFixed(1).replace('.',',')+' s':'–';
+  const has=items.length>0,pending=items.some(it=>it.status==='wait'||it.status==='err');
+  $('bRun').disabled=running||!pending;
+  $('bZip').disabled=$('bXls').disabled=$('bClr').disabled=running||!has;
+  for(const tr of document.querySelectorAll('#rows tr[data-id]')){const it=items.find(i=>i.id==tr.dataset.id),p=tr.querySelector('[data-p]');if(it&&p)p.textContent=it.path}
+}
+
+function add(files){
+  const ok=[...files].filter(f=>/^image\/(jpeg|png|webp)$/.test(f.type));
+  if(ok.length<files.length)msg('Unele fișiere au fost ignorate: folosește poze JPG, PNG sau WEBP (pozele HEIC de pe iPhone trebuie salvate ca JPG).',true);
+  else msg(ok.length+' bonuri adăugate. Apasă „Citește bonurile cu AI”.');
+  for(const f of ok)items.push({id:nid++,file:f,url:URL.createObjectURL(f),status:'wait',data:{}});
+  render();
+}
+$('file').addEventListener('change',e=>{add(e.target.files);e.target.value=''});
+const drop=$('drop');
+drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('on')});
+drop.addEventListener('dragleave',()=>drop.classList.remove('on'));
+drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('on');add(e.dataTransfer.files)});
+$('optShop').addEventListener('change',stats);$('optSum').addEventListener('change',stats);
+
+$('key').value=store.get('gemKey');$('model').value=store.get('gemModel')||$('model').value;
+if(store.get('eng')==='gemini')document.querySelector('input[value=gemini]').checked=true;
+const syncEng=()=>{$('keybox').classList.toggle('on',engine()==='gemini');store.set('eng',engine())};
+document.querySelectorAll('input[name=eng]').forEach(r=>r.addEventListener('change',syncEng));syncEng();
+$('key').addEventListener('change',()=>store.set('gemKey',$('key').value.trim()));
+$('model').addEventListener('change',()=>store.set('gemModel',$('model').value.trim()));
+
+$('rows').addEventListener('change',e=>{
+  const tr=e.target.closest('tr[data-id]'),f=e.target.dataset.f;if(!tr||!f)return;
+  const it=items.find(i=>i.id==tr.dataset.id);
+  it.data[f]=f==='total'?(e.target.value===''?null:Number(e.target.value)):e.target.value;
+  if(it.status==='done')it.data.conf='mare';
+  render();
+});
+$('rows').addEventListener('click',e=>{
+  const tr=e.target.closest('tr[data-id]');if(!tr)return;
+  const i=items.findIndex(x=>x.id==tr.dataset.id);
+  if(e.target.closest('[data-del]')){URL.revokeObjectURL(items[i].url);items.splice(i,1);render()}
+  else if(e.target.closest('[data-retry]')){items[i].status='wait';items[i].err='';render();run()}
+});
+$('bClr').addEventListener('click',()=>{items.forEach(it=>URL.revokeObjectURL(it.url));items=[];aiMs=0;aiCount=0;msg('');render()});
+
+/* ---------- prelucrare imagine ---------- */
+async function canvasOf(file,maxSide,gray){
+  const bmp=await createImageBitmap(file);
+  let k=Math.min(maxSide/Math.max(bmp.width,bmp.height),gray?2.5:1);
+  const c=document.createElement('canvas');c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);
+  const g=c.getContext('2d');g.drawImage(bmp,0,0,c.width,c.height);
+  if(gray){const im=g.getImageData(0,0,c.width,c.height),a=im.data;let lo=255,hi=0;
+    for(let i=0;i<a.length;i+=4){const v=0.299*a[i]+0.587*a[i+1]+0.114*a[i+2];a[i]=v;if(v<lo)lo=v;if(v>hi)hi=v}
+    const r=Math.max(1,hi-lo);for(let i=0;i<a.length;i+=4){const v=Math.max(0,Math.min(255,(a[i]-lo)*255/r));a[i]=a[i+1]=a[i+2]=v}
+    g.putImageData(im,0,0)}
+  return c;
+}
+
+/* ---------- motor 1: OCR + reguli ---------- */
+function parseReceipt(text){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean),U=strip(text).toUpperCase(),now=new Date().getFullYear();
+  let date='',total=null,cui='',nr='',shop='',chain=false;
+  const dre=/(\d{1,2})\s?[.\/-]\s?(\d{1,2})\s?[.\/-]\s?(\d{4}|\d{2})(?!\d)/g;
+  const dl=[...lines.filter(l=>/DATA/i.test(strip(l))),...lines];
+  outer:for(const l of dl){for(const m of l.replace(/[Oo](?=\d)|(?<=\d)[Oo]/g,'0').matchAll(dre)){
+    let d=+m[1],mo=+m[2],y=+m[3];if(y<100)y+=2000;
+    if(d>=1&&d<=31&&mo>=1&&mo<=12&&y>=2000&&y<=now+1){date=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;break outer}}}
+  const amts=l=>[...l.replace(/\s+(?=\d{2}\b)/g,'').matchAll(/(\d{1,6})\s?[.,]\s?(\d{2})(?!\d)/g)].map(m=>parseFloat(m[1]+'.'+m[2]));
+  for(let i=0;i<lines.length&&total==null;i++){const s=strip(lines[i]).toUpperCase();
+    if(/T[O0]TAL/.test(s)&&!/SUB\s?T[O0]TAL|TVA|T[O0]TAL\s+TVA|DISCOUNT|REDUCERE/.test(s)){
+      let a=amts(lines[i]);if(!a.length&&lines[i+1])a=amts(lines[i+1]);if(a.length)total=a[a.length-1]}}
+  if(total==null)for(const l of lines){const s=strip(l).toUpperCase();if(/CARD|NUMERAR|PLATA|DE PLATA/.test(s)){const a=amts(l);if(a.length){total=a[a.length-1];break}}}
+  const cm=/(C\.?\s?U\.?\s?I|C\.?\s?I\.?\s?F|COD\s+FISCAL|COD\s+IDENTIFICARE(\s+FISCALA)?)[^0-9R]{0,6}((?:R\s?O)?\s?\d{2,10})/.exec(U);
+  if(cm)cui=cm[3].replace(/\s/g,'');
+  const nm=/(BON\s*(FISCAL)?\s*NR\.?|NR\.?\s*BON|BF\s*NR\.?)[:\s#]*(\d{1,8})/.exec(U);if(nm)nr=nm[3];
+  for(const c of CHAINS){const k=strip(c).toUpperCase().replace(/[.']/g,'\\$&');
+    if(new RegExp('(^|[^A-Z])'+k.replace(/ /g,'\\s?')+'($|[^A-Z])').test(U)){shop=c;chain=true;break}}
+  if(!shop){const l=lines.slice(0,5).find(l=>(strip(l).match(/[A-Za-z]/g)||[]).length>=3&&!/BON|FISCAL|C\.?I\.?F|C\.?U\.?I|STR|JUD|NR\./i.test(strip(l)));
+    if(l)shop=strip(l).replace(/^S\.?\s?C\.?\s+/i,'').replace(/\s+(S\.?\s?R\.?\s?L|S\.?\s?A)\.?\b.*$/i,'').replace(/[^A-Za-z0-9&' -]/g,'').trim().toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase()).slice(0,30)}
+  const miss=[!date&&'data',total==null&&'totalul',!shop&&'magazinul'].filter(Boolean);
+  const conf=date&&total!=null&&chain?'mare':date&&total!=null?'medie':'mica';
+  const isReceipt=/FISCAL|T[O0]TAL|TVA|C\.?I\.?F|C\.?U\.?I/.test(U);
+  return {date,shop,cui,nr,total,conf,notReceipt:!isReceipt,
+    obs:!isReceipt?'Imaginea nu pare a fi un bon fiscal.':miss.length?'Nu s-a putut citi: '+miss.join(', ')+'.':conf==='medie'?'Verifică numele magazinului.':''};
+}
+async function getOcr(){
+  if(ocrWorker)return ocrWorker;
+  if(!window.Tesseract)throw new Error('Biblioteca OCR nu s-a încărcat. Verifică conexiunea la internet.');
+  msg('Se încarcă modelul OCR pentru limba română (doar prima dată, câteva secunde)…');
+  ocrWorker=await Tesseract.createWorker('ron',1,{logger:m=>{const it=items.find(i=>i.status==='run');if(it&&m.status==='recognizing text'){it.prog='Se citește… '+Math.round(m.progress*100)+'%';const tr=document.querySelector(`tr[data-id="${it.id}"] .st`);if(tr)tr.textContent=it.prog}}});
+  await ocrWorker.setParameters({tessedit_pageseg_mode:'4',preserve_interword_spaces:'1'});
+  return ocrWorker;
+}
+async function readOcr(it){
+  const w=await getOcr();const c=await canvasOf(it.file,2200,true);
+  const {data}=await w.recognize(c);const r=parseReceipt(data.text||'');r.raw=data.text||'';return r;
+}
+
+/* ---------- motor 2: Gemini ---------- */
+function parseJSON(t){const m=/\{[\s\S]*\}/.exec(t||'');if(!m)throw new Error('Răspuns fără JSON');return JSON.parse(m[0])}
+async function readGemini(it){
+  const key=$('key').value.trim(),model=$('model').value.trim()||'gemini-3.6-flash';
+  if(!key)throw Object.assign(new Error('Introdu cheia API Gemini sau alege OCR în browser.'),{fatal:true});
+  const c=await canvasOf(it.file,1568,false);
+  const b64=c.toDataURL('image/jpeg',0.85).split(',')[1];
+  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',
+    headers:{'Content-Type':'application/json','x-goog-api-key':key},
+    body:JSON.stringify({contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:'image/jpeg',data:b64}}]}]})});
+  if(!res.ok){const t=await res.text();const fatal=res.status===400||res.status===401||res.status===403||res.status===404||res.status===429;
+    throw Object.assign(new Error(res.status===429?'Limita de cereri Gemini a fost atinsă; reîncearcă peste un minut.':res.status===404?'Modelul Gemini nu există; verifică numele modelului.':(res.status===400||res.status===403)?'Cheia API Gemini nu este validă.':'Eroare Gemini ('+res.status+').'),{fatal,detail:t})}
+  const out=await res.json();const text=(out.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');
+  const j=parseJSON(text);const tot=j.total==null?null:Number(String(j.total).replace(',','.'));
+  return {date:parts(j.data)?j.data:'',shop:j.magazin||'',cui:j.cui||'',nr:j.nr_bon||'',total:isNaN(tot)?null:tot,
+    conf:j.incredere||'mica',notReceipt:j.este_bon===false,obs:j.este_bon===false?'Imaginea nu pare a fi un bon fiscal.':(j.observatii||'')};
+}
+
+async function readOne(it,eng){
+  it.status='run';it.err='';it.prog='';render();
+  const t0=performance.now();
+  try{it.data=eng==='gemini'?await readGemini(it):await readOcr(it);aiMs+=performance.now()-t0;aiCount++;it.status='done'}
+  catch(e){it.status='err';it.err=e.message||'Bonul nu a putut fi citit.';if(e.fatal||/OCR nu s-a/.test(it.err))throw e}
+  render();
+}
+async function run(){
+  if(running)return;running=true;stats();
+  const eng=engine();msg(eng==='gemini'?'Gemini citește bonurile…':'Se citesc bonurile…');
+  const queue=items.filter(it=>it.status==='wait'||it.status==='err');let stop=false;
+  const worker=async()=>{while(queue.length&&!stop){const it=queue.shift();try{await readOne(it,eng)}catch(e){stop=true;msg(e.message,true)}}};
+  await Promise.all(eng==='gemini'?[worker(),worker()]:[worker()]);
+  running=false;
+  if(!stop){const w=items.filter(needsCheck).length;msg(w?`Gata. ${w} bonuri sunt de verificat: corectează-le în tabel înainte de export.`:'Gata. Toate bonurile au fost citite; le poți descărca.')}
+  render();
+}
+$('bRun').addEventListener('click',run);
+
+/* ---------- export ---------- */
+function workbook(){
+  names();
+  const list=[...items].sort((a,b)=>(a.data.date||'9').localeCompare(b.data.date||'9'));
+  const rows=[['Nr.','Data','Luna','Magazin','CUI','Nr. bon','Total (lei)','Fișier','Folder','Observații']];
+  list.forEach((it,i)=>{const d=it.data,p=parts(d.date);
+    rows.push([i+1,p?new Date(+p.y,+p.m-1,+p.d):'',p?`${MONTHS[+p.m-1]} ${p.y}`:'Fără dată',d.shop||'',d.cui||'',d.nr||'',Number(d.total)||0,it.path.split('/').pop(),folder(it),needsCheck(it)?('De verificat. '+(d.obs||'')).trim():(d.obs||'')])});
+  const n=rows.length;rows.push(['','','','','','TOTAL',null,'','','']);
+  const ws=XLSX.utils.aoa_to_sheet(rows,{cellDates:true});
+  ws['G'+(n+1)]={t:'n',f:`SUM(G2:G${n})`,v:list.reduce((a,it)=>a+(Number(it.data.total)||0),0),z:'#,##0.00'};
+  for(let r=2;r<=n;r++){if(ws['B'+r]&&ws['B'+r].t==='d')ws['B'+r].z='dd.mm.yyyy';if(ws['G'+r])ws['G'+r].z='#,##0.00'}
+  ws['!cols']=[{wch:5},{wch:12},{wch:16},{wch:22},{wch:14},{wch:10},{wch:12},{wch:40},{wch:20},{wch:40}];
+  ws['!autofilter']={ref:`A1:J${n}`};
+  const by={};for(const it of list){const p=parts(it.data.date),k=p?p.y+'-'+p.m:'zz';(by[k]=by[k]||{lab:p?`${MONTHS[+p.m-1]} ${p.y}`:'Fără dată',c:0,s:0});by[k].c++;by[k].s+=Number(it.data.total)||0}
+  const keys=Object.keys(by).sort(),r2=[['Luna','Nr. bonuri','Total (lei)']];
+  keys.forEach(k=>r2.push([by[k].lab,by[k].c,Math.round(by[k].s*100)/100]));
+  const m=r2.length;r2.push(['TOTAL',null,null]);
+  const ws2=XLSX.utils.aoa_to_sheet(r2);
+  ws2['B'+(m+1)]={t:'n',f:`SUM(B2:B${m})`,v:list.length};
+  ws2['C'+(m+1)]={t:'n',f:`SUM(C2:C${m})`,v:list.reduce((a,it)=>a+(Number(it.data.total)||0),0),z:'#,##0.00'};
+  for(let r=2;r<=m;r++)if(ws2['C'+r])ws2['C'+r].z='#,##0.00';
+  ws2['!cols']=[{wch:20},{wch:12},{wch:14}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Bonuri');XLSX.utils.book_append_sheet(wb,ws2,'Total pe luni');
+  return new Blob([XLSX.write(wb,{bookType:'xlsx',type:'array'})],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+const stamp=()=>{const d=new Date();return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`};
+function save(filename,blob){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);msg('Fișierul „'+filename+'” a fost descărcat.')}
+$('bXls').addEventListener('click',()=>{try{save(`Centralizator_bonuri_${stamp()}.xlsx`,workbook())}catch(e){msg('Excelul nu a putut fi creat.',true)}});
+$('bZip').addEventListener('click',async()=>{
+  try{msg('Se pregătește arhiva…');const zip=new JSZip(),root=`Bonuri_${stamp()}`;
+    names();for(const it of items)zip.file(root+'/'+it.path,it.file);
+    zip.file(root+'/Centralizator_bonuri.xlsx',workbook());
+    save(root+'.zip',await zip.generateAsync({type:'blob'}))}
+  catch(e){msg('Arhiva nu a putut fi creată.',true)}
+});
+render();
+}
+</script>
+</body>
+</html>
