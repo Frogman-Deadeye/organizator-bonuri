@@ -22,7 +22,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "IBM Plex San
 header{background:var(--band);color:#fff}
 header h1{font-size:clamp(28px,4vw,42px);line-height:1.05;margin:0 0 8px;text-wrap:balance}
 header p{margin:0;max-width:62ch;color:#cdd3ee}
-.drop{margin-top:22px;border:2px dashed #8d9ad6;border-radius:14px;background:rgba(255,255,255,.06);padding:28px 20px;text-align:center;cursor:pointer;transition:background .2s}
+.drop{display:block;margin-top:22px;border:2px dashed #8d9ad6;border-radius:14px;background:rgba(255,255,255,.06);padding:28px 20px;text-align:center;cursor:pointer;transition:background .2s}
 .drop.on{background:rgba(255,255,255,.16)}
 .drop strong{display:block;font-size:20px}
 .drop span{color:#cdd3ee;font-size:15px}
@@ -166,6 +166,7 @@ function baseName(it){
   if($('optSum').checked&&it.data.total!=null&&it.data.total!=='')n+='_'+(Number(it.data.total)||0).toFixed(2).replace('.',',')+'lei';
   return n;
 }
+const showDate=d=>{const p=parts(d);return p?`${p.d}.${p.m}.${p.y}`:''};
 function folder(it){const p=parts(it.data.date);return p?`${p.y}/${p.m}-${MONTHS[+p.m-1]}`:'Fara-data'}
 function names(){const used={};for(const it of items){let b=baseName(it),f=folder(it),k=f+'/'+b,i=1;while(used[k])k=f+'/'+b+'_'+(++i);used[k]=1;it.path=k+'.'+ext(it.file)}}
 function needsCheck(it){const d=it.data;return it.status==='done'&&(d.conf!=='mare'||!parts(d.date)||d.total==null||d.total===''||d.notReceipt)}
@@ -184,9 +185,9 @@ function render(){
     const raw=d.raw?`<details><summary>Text citit</summary><pre>${esc(d.raw)}</pre></details>`:'';
     return `<tr data-id="${it.id}">
       <td><img class="thumb" src="${it.url}" alt="Bon ${esc(it.file.name)}"></td>
-      <td><input type="date" data-f="date" value="${esc(d.date||'')}" aria-label="Data"></td>
+      <td><input type="text" inputmode="numeric" placeholder="ZZ.LL.AAAA" data-f="date" value="${esc(showDate(d.date))}" aria-label="Data" style="max-width:130px"></td>
       <td><input type="text" data-f="shop" value="${esc(d.shop||'')}" aria-label="Magazin"></td>
-      <td><input type="number" step="0.01" class="num" data-f="total" value="${esc(d.total??'')}" aria-label="Total"></td>
+      <td><input type="text" inputmode="decimal" class="num" data-f="total" value="${d.total!=null&&d.total!==''?esc((Number(d.total)||0).toFixed(2).replace('.',',')):''}" aria-label="Total"></td>
       <td><div class="fname" data-p>${esc(it.path)}</div></td>
       <td>${st}${obs}${raw}${it.status==='err'?' <button class="x" data-retry>Reîncearcă</button>':''}</td>
       <td><button class="x" data-del aria-label="Șterge bonul">Șterge</button></td></tr>`}).join('');
@@ -228,8 +229,11 @@ $('model').addEventListener('change',()=>store.set('gemModel',$('model').value.t
 $('rows').addEventListener('change',e=>{
   const tr=e.target.closest('tr[data-id]'),f=e.target.dataset.f;if(!tr||!f)return;
   const it=items.find(i=>i.id==tr.dataset.id);
-  it.data[f]=f==='total'?(e.target.value===''?null:Number(e.target.value)):e.target.value;
-  if(it.status==='done')it.data.conf='mare';
+  if(f==='date'){const m=/^\s*(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})\s*$/.exec(e.target.value);
+    if(e.target.value.trim()&&!m){msg('Scrie data ca ZZ.LL.AAAA, de exemplu 24.11.2026.',true);render();return}
+    it.data.date=m?`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`:''}
+  else it.data[f]=f==='total'?(e.target.value===''?null:Number(String(e.target.value).replace(',','.'))):e.target.value;
+  if(it.status==='done'){it.data.conf='mare';it.data.obs='Corectat manual.';it.data.notReceipt=false}
   render();
 });
 $('rows').addEventListener('click',e=>{
@@ -300,6 +304,11 @@ function parseReceipt(text){
   // 5) magazin
   for(const c of CHAINS){const k=strip(c).toUpperCase().replace(/[.']/g,'\\$&').replace(/ /g,'\\s?');
     if(new RegExp('(^|[^A-Z])'+k+'($|[^A-Z])').test(U)){shop=c;chain=true;break}}
+  if(!shop){/* potrivire aproximativă: acceptă 1-2 litere citite greșit în primele rânduri */
+    const lev=(a,b)=>{const d=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){let p=d[0];d[0]=i;for(let j=1;j<=b.length;j++){const t=d[j];d[j]=Math.min(d[j]+1,d[j-1]+1,p+(a[i-1]===b[j-1]?0:1));p=t}}return d[b.length]};
+    const heads=L.slice(0,8).map(l=>l.replace(/[^A-Z]/g,''));
+    search:for(const c of CHAINS){const k=strip(c).toUpperCase().replace(/[^A-Z]/g,'');if(k.length<5)continue;const tol=k.length>=8?2:1;
+      for(const s of heads)for(let n=k.length-1;n<=k.length+1;n++)for(let i=0;i+n<=s.length;i++)if(lev(s.substr(i,n),k)<=tol){shop=c;chain=true;break search}}}
   if(!shop){const ADDR=/BON|FISCAL|C\.?I\.?F|C\.?U\.?I|STR|JUD|NR\.|MUNICIPIUL|SECTOR|BUCURESTI|CALEA|BD\.?|BULEVARD|SOS|PARTER|COD|TEL/;
     const l=lines.slice(0,6).find((x,i)=>(L[i].match(/[A-Z]/g)||[]).length>=4&&!ADDR.test(L[i]));
     if(l)shop=strip(l).replace(/^S\.?\s?C\.?\s+/i,'').replace(/\s+(S\.?\s?R\.?\s?L|S\.?\s?A|SCS)\.?\b.*$/i,'').replace(/[^A-Za-z0-9&' -]/g,'').trim().toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase()).slice(0,30)}
