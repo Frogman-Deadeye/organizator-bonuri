@@ -2,7 +2,7 @@
 
 Aplicație web care folosește inteligența artificială pentru a organiza bonurile fiscale în vederea decontării.
 
-**Aplicația online:** [frogman-deadeye.github.io/organizator-bonuri](https://frogman-deadeye.github.io/organizator-bonuri/) 
+**Aplicația online:** `https://frogman-deadeye.github.io/organizator-bonuri/` 
 
 ## Ce face
 
@@ -54,7 +54,7 @@ Promptul folosit pentru Gemini este afișat în aplicație, la secțiunea „Cum
 1. Creează un repository public numit `organizator-bonuri`.
 2. Încarcă fișierele `index.html`, `README.md` și folderul `exemple/`.
 3. Mergi la **Settings → Pages**, alege **Deploy from a branch**, ramura `main`, folderul `/ (root)` și apasă **Save**.
-4. După 1–2 minute aplicația este disponibilă la [frogman-deadeye.github.io/organizator-bonuri](https://frogman-deadeye.github.io/organizator-bonuri/).
+4. După 1–2 minute aplicația este disponibilă la `https://frogman-deadeye.github.io/organizator-bonuri/`.
 
 ---
 

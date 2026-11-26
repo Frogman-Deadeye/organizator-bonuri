@@ -50,9 +50,14 @@ td input{width:100%;font:16px "IBM Plex Sans",sans-serif;padding:8px;border:1px 
 td input.num{text-align:right;font-family:"IBM Plex Mono",monospace;max-width:120px}
 .thumb{width:52px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
 .fname{font:500 13px/1.4 "IBM Plex Mono",monospace;overflow-wrap:anywhere;color:var(--mute)}
-.st{font-size:13px;font-weight:600;white-space:nowrap}
-.st.ok{color:var(--ok)}.st.warn{color:var(--warn)}.st.bad{color:var(--red)}.st.run{color:var(--mute)}
-.obs{font-size:13px;color:var(--warn);margin-top:3px}
+.st{display:inline-block;font-size:13px;font-weight:700;white-space:nowrap;padding:3px 10px;border-radius:999px}
+.st.ok{background:#00a9a5;color:#0B2B2A}
+.st.warn{background:#FF8C1A;color:#1F363D}
+.st.bad{background:#9e2a2b;color:#fff}
+.st.run{padding:0;color:var(--mute);font-weight:600}
+.notbon{display:block;border:2px solid #9e2a2b;background:#9e2a2b;color:#fff;font-size:13px;font-weight:700;line-height:1.35;padding:7px 10px;border-radius:8px;max-width:240px}
+.obs{font-size:13px;font-weight:600;color:#B34700;margin-top:5px}
+.obs.good{color:#007a77}
 .x{min-height:36px;padding:0 10px;font-size:14px}
 .empty{text-align:center;color:var(--mute);padding:36px 10px}
 details{margin-top:26px;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
@@ -81,7 +86,7 @@ footer{color:var(--mute);font-size:14px}
 .thumbbtn .mag{position:absolute;right:-6px;bottom:-6px;width:24px;height:24px;border-radius:50%;background:var(--yellow);color:var(--deep);display:grid;place-items:center;box-shadow:0 1px 3px rgba(0,0,0,.4)}
 .thumbbtn .mag svg{width:13px;height:13px}
 .thumbbtn:hover .mag{transform:scale(1.12)}
-.ok-btn{min-height:32px;padding:0 10px;font-size:13px;margin-top:6px;border-color:var(--ok);color:var(--ok)}
+.ok-btn{min-height:32px;padding:0 10px;font-size:13px;margin-top:6px;border:2px solid #007a77;color:#007a77}
 #lb{position:fixed;inset:0;z-index:50;background:rgba(31,54,61,.97);display:none;flex-direction:column}
 #lb.on{display:flex}
 #lb .top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:10px 14px;color:#fff}
@@ -113,10 +118,6 @@ footer{color:var(--mute);font-size:14px}
     <strong>Trage pozele bonurilor aici</strong>
     <span>sau apasă pentru a le alege (JPG, PNG, WEBP), oricâte deodată</span>
   </label>
-  <div class="opts">
-    <label><input type="checkbox" id="optShop" checked> Magazinul în numele fișierului</label>
-    <label><input type="checkbox" id="optSum" checked> Suma în numele fișierului</label>
-  </div>
   <div class="eng" role="radiogroup" aria-label="Motor de citire">
     <span>Motor de citire:</span>
     <label><input type="radio" name="eng" value="ocr" checked> OCR în browser (gratuit, fără cont)</label>
@@ -145,7 +146,7 @@ footer{color:var(--mute);font-size:14px}
   <div class="msg" id="msg" role="status"></div>
   <div class="scroll">
   <table class="stack" id="tbl">
-    <thead><tr><th>Bon</th><th>Data</th><th>Magazin</th><th>Total (lei)</th><th>Nume nou și folder</th><th>Stare</th><th></th></tr></thead>
+    <thead><tr><th>Bon</th><th>Data</th><th>Magazin</th><th>Total (lei)</th><th>Nume nou</th><th>Stare</th><th></th></tr></thead>
     <tbody id="rows"><tr><td colspan="7" class="empty">Niciun bon încă. Încarcă poze mai sus.</td></tr></tbody>
   </table>
   </div>
@@ -186,22 +187,24 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const lei=n=>(Number(n)||0).toLocaleString('ro-RO',{minimumFractionDigits:2,maximumFractionDigits:2})+' lei';
 const msg=(t,err)=>{const m=$('msg');m.textContent=t;m.className='msg'+(err?' err':'')};
 const strip=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'');
-const clean=s=>strip(s).replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,28);
+const clean=s=>strip(s).replace(/[\\/:*?"<>|_]+/g,' ').replace(/\s+/g,' ').trim().replace(/[. ]+$/,'').slice(0,40);
 const ext=f=>{const m=/\.([a-z0-9]+)$/i.exec(f.name);return (m?m[1]:'jpg').toLowerCase()};
 const store={get(k){try{return localStorage.getItem(k)||''}catch(e){return ''}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 const engine=()=>document.querySelector('input[name=eng]:checked').value;
 
 function parts(d){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?{y:m[1],m:m[2],d:m[3]}:null}
 function baseName(it){
-  const p=parts(it.data.date);let n=p?`${p.d}-${p.m}-${p.y}`:'fara-data';
-  if($('optShop').checked&&it.data.shop)n+='_'+clean(it.data.shop);
-  if($('optSum').checked&&it.data.total!=null&&it.data.total!=='')n+='_'+(Number(it.data.total)||0).toFixed(2).replace('.',',')+'lei';
-  return n;
+  /* format obligatoriu: AAAA.LL.ZZ_Magazin */
+  const p=parts(it.data.date);
+  return (p?`${p.y}.${p.m}.${p.d}`:'fara-data')+'_'+(clean(it.data.shop)||'fara-magazin');
 }
+const fileName=it=>(it.path||'').split('/').pop();
 const showDate=d=>{const p=parts(d);return p?`${p.d}.${p.m}.${p.y}`:''};
 function folder(it){const p=parts(it.data.date);return p?`${p.y}/${p.m}`:'Fara-data'}
 function names(){const used={};for(const it of items){let b=baseName(it),f=folder(it),k=f+'/'+b,i=1;while(used[k])k=f+'/'+b+'_'+(++i);used[k]=1;it.path=k+'.'+ext(it.file)}}
-function needsCheck(it){const d=it.data;return it.status==='done'&&(d.conf!=='mare'||!parts(d.date)||d.total==null||d.total===''||d.notReceipt)}
+function notBon(it){return it.status==='done'&&!!it.data.notReceipt}
+function needsCheck(it){const d=it.data;return it.status==='done'&&!d.notReceipt&&(d.conf!=='mare'||!parts(d.date)||d.total==null||d.total==='')}
+const exportable=()=>items.filter(it=>!notBon(it));
 
 function render(){
   names();
@@ -212,15 +215,17 @@ function render(){
     let st='<span class="st run">În așteptare</span>';
     if(it.status==='run')st=`<span class="st run">${esc(it.prog||'Se citește…')}</span>`;
     if(it.status==='err')st='<span class="st bad">Eroare</span>';
-    if(it.status==='done')st=chk?'<span class="st warn">De verificat</span>':'<span class="st ok">Gata</span>';
-    const obs=(it.err||d.obs)?`<div class="obs">${esc(it.err||d.obs)}</div>`:'';
+    if(it.status==='done')st=chk?'<span class="st warn">! De verificat</span>':'<span class="st ok">✓ Gata</span>';
+    const nb=notBon(it);if(nb)st='<span class="notbon">Imaginea nu pare a fi un bon fiscal</span>';
+    const note=it.err||(nb?'':d.obs);
+    const obs=note?`<div class="obs${/^(Corectat|Verificat) manual/.test(note)?' good':''}">${/^(Corectat|Verificat) manual/.test(note)?'✓ ':''}${esc(note)}</div>`:'';
     const raw=d.raw?`<div><button class="link" data-raw aria-expanded="${!!it.open}">${it.open?'Ascunde textul citit ▴':'Vezi textul citit ▾'}</button></div>`:'';
     return `<tr data-id="${it.id}">
       <td><button class="thumbbtn" data-view title="Vezi bonul mărit"><img class="thumb" src="${it.url}" alt="Bon ${esc(it.file.name)}"><span class="mag" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg></span></button></td>
       <td><input type="text" inputmode="numeric" placeholder="ZZ.LL.AAAA" data-f="date" value="${esc(showDate(d.date))}" aria-label="Data" style="min-width:128px"></td>
       <td><input type="text" data-f="shop" value="${esc(d.shop||'')}" aria-label="Magazin"></td>
       <td><input type="text" inputmode="decimal" class="num" data-f="total" value="${d.total!=null&&d.total!==''?esc((Number(d.total)||0).toFixed(2).replace('.',',')):''}" aria-label="Total"></td>
-      <td><div class="fname" data-p>${esc(it.path)}</div></td>
+      <td><div class="fname" data-p>${nb?'– nu se include în export':esc(fileName(it))}</div></td>
       <td>${st}${obs}${chk?'<div><button class="x ok-btn" data-ok title="Am verificat: data, magazinul și suma sunt corecte">Verificat ✓</button></div>':''}${raw}${it.status==='err'?' <button class="x" data-retry>Reîncearcă</button>':''}</td>
       <td><button class="x" data-del aria-label="Șterge bonul">Șterge</button></td></tr>`+
       (d.raw&&it.open?`<tr class="rawrow" data-id="${it.id}"><td colspan="7"><div class="rawhead"><b>Text citit de pe bon (${esc(it.file.name)})</b><button class="x" data-copy>Copiază textul</button></div><div class="rawgrid"><img src="${it.url}" alt="Bon ${esc(it.file.name)}" data-view title="Vezi bonul mărit"><pre>${esc(d.raw)}</pre></div></td></tr>`:'')}).join('');
@@ -229,13 +234,13 @@ function render(){
 function stats(){
   names();
   $('sN').textContent=items.length;
-  $('sT').textContent=lei(items.reduce((a,it)=>a+(Number(it.data.total)||0),0));
+  $('sT').textContent=lei(exportable().reduce((a,it)=>a+(Number(it.data.total)||0),0));
   $('sW').textContent=items.filter(needsCheck).length;
   $('sTime').textContent=aiCount?(aiMs/aiCount/1000).toFixed(1).replace('.',',')+' s':'–';
   const has=items.length>0,pending=items.some(it=>it.status==='wait'||it.status==='err');
   $('bRun').disabled=running||!pending;
   $('bZip').disabled=$('bXls').disabled=$('bClr').disabled=running||!has;
-  for(const tr of document.querySelectorAll('#rows tr[data-id]')){const it=items.find(i=>i.id==tr.dataset.id),p=tr.querySelector('[data-p]');if(it&&p)p.textContent=it.path}
+  for(const tr of document.querySelectorAll('#rows tr[data-id]')){const it=items.find(i=>i.id==tr.dataset.id),p=tr.querySelector('[data-p]');if(it&&p)p.textContent=notBon(it)?'– nu se include în export':fileName(it)}
 }
 
 function add(files){
@@ -250,7 +255,6 @@ const drop=$('drop');
 drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('on')});
 drop.addEventListener('dragleave',()=>drop.classList.remove('on'));
 drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('on');add(e.dataTransfer.files)});
-$('optShop').addEventListener('change',stats);$('optSum').addEventListener('change',stats);
 
 $('key').value=store.get('gemKey');$('model').value=store.get('gemModel')||$('model').value;
 if(store.get('eng')==='gemini')document.querySelector('input[value=gemini]').checked=true;
@@ -286,7 +290,7 @@ $('rows').addEventListener('click',e=>{
 let lbI=-1;
 function openLb(i){if(!items[i])return;lbI=i;const it=items[i];names();
   $('lbImg').src=it.url;$('lbImg').alt='Bon '+it.file.name;
-  $('lbCap').textContent=`${i+1} / ${items.length} · ${it.file.name} → ${it.path}`;
+  $('lbCap').textContent=`${i+1} / ${items.length} · ${it.file.name} → ${fileName(it)}`;
   $('lb').classList.add('on');$('lb').classList.remove('zoom');$('lbZoom').textContent='Mărește';
   $('lbPrev').disabled=i===0;$('lbNext').disabled=i===items.length-1;$('lbClose').focus()}
 function closeLb(){$('lb').classList.remove('on');lbI=-1}
@@ -374,6 +378,7 @@ function finalize(r){
   r.conf=(r._ds&&r._ts&&r._chain)?'mare':(r.date&&r.total!=null)?'medie':'mica';
   const n=[];if(miss.length)n.push('Nu s-a putut citi: '+miss.join(', ')+'.');
   if(r.date&&!r._ds)n.push('Data dedusă parțial, verific-o.');if(r.total!=null&&!r._ts)n.push('Verifică totalul.');if(r.shop&&!r._chain)n.push('Verifică magazinul.');
+  if(r.notReceipt){r.shop='';r.date='';r.total=null}
   r.obs=r.notReceipt?'Imaginea nu pare a fi un bon fiscal.':n.join(' ');return r;
 }
 function merge(a,b){
@@ -437,7 +442,8 @@ async function run(){
   const worker=async()=>{while(queue.length&&!stop){const it=queue.shift();try{await readOne(it,eng)}catch(e){stop=true;msg(e.message,true)}}};
   await Promise.all(eng==='gemini'?[worker(),worker()]:[worker()]);
   running=false;
-  if(!stop){const w=items.filter(needsCheck).length;msg(w?`Gata. ${w} bonuri sunt de verificat: corectează-le în tabel înainte de export.`:'Gata. Toate bonurile au fost citite; le poți descărca.')}
+  if(!stop){const w=items.filter(needsCheck).length,nb=items.filter(notBon).length;
+    msg((w?`Gata. ${w} bonuri sunt de verificat: corectează-le în tabel înainte de export.`:'Gata. Toate bonurile au fost citite; le poți descărca.')+(nb?` ${nb} imagini nu par a fi bonuri și nu vor fi incluse în export.`:''))}
   render();
 }
 $('bRun').addEventListener('click',run);
@@ -445,7 +451,7 @@ $('bRun').addEventListener('click',run);
 /* ---------- export ---------- */
 function workbook(){
   names();
-  const list=[...items].sort((a,b)=>(a.data.date||'9').localeCompare(b.data.date||'9'));
+  const list=exportable().sort((a,b)=>(a.data.date||'9').localeCompare(b.data.date||'9'));
   const rows=[['Nr.','Data','Luna','Magazin','CUI','Nr. bon','Total (lei)','Fișier','Folder','Observații']];
   list.forEach((it,i)=>{const d=it.data,p=parts(d.date);
     rows.push([i+1,p?new Date(+p.y,+p.m-1,+p.d):'',p?`${MONTHS[+p.m-1]} ${p.y}`:'Fără dată',d.shop||'',d.cui||'',d.nr||'',Number(d.total)||0,it.path.split('/').pop(),folder(it),needsCheck(it)?('De verificat. '+(d.obs||'')).trim():(d.obs||'')])});
@@ -472,7 +478,7 @@ function save(filename,blob){const u=URL.createObjectURL(blob),a=document.create
 $('bXls').addEventListener('click',()=>{try{save(`Centralizator_bonuri_${stamp()}.xlsx`,workbook())}catch(e){msg('Excelul nu a putut fi creat.',true)}});
 $('bZip').addEventListener('click',async()=>{
   try{msg('Se pregătește arhiva…');const zip=new JSZip(),root=`Bonuri_${stamp()}`;
-    names();for(const it of items)zip.file(root+'/'+it.path,it.file);
+    names();for(const it of exportable())zip.file(root+'/'+it.path,it.file);
     zip.file(root+'/Centralizator_bonuri.xlsx',workbook());
     save(root+'.zip',await zip.generateAsync({type:'blob'}))}
   catch(e){msg('Arhiva nu a putut fi creată.',true)}
